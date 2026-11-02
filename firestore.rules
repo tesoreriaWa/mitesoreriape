@@ -1,0 +1,57 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function myMember(groupId) {
+      return signedIn() && exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.active == true;
+    }
+    function isAdmin(groupId) {
+      return myMember(groupId) &&
+        get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role in ['treasurer', 'delegate'];
+    }
+    match /groups/{groupId} {
+      allow read, write: if false;
+      match /public/{docId} {
+        allow read: if docId == 'summary' && myMember(groupId);
+        allow write: if false;
+      }
+      match /members/{uid} {
+        allow get: if signedIn() && request.auth.uid == uid; // Pending puede consultar solo su estado.
+        allow list: if false;
+        allow write: if false;
+      }
+      match /profiles/{uid} {
+        allow get: if myMember(groupId) && (request.auth.uid == uid || isAdmin(groupId));
+        allow list: if false;
+        allow write: if false;
+      }
+      match /ledger/{entryId} {
+        allow read, write: if false;
+      }
+      match /allocations/{allocationId} {
+        allow read, write: if false;
+      }
+      match /balances/{balanceId} {
+        allow read, write: if false;
+      }
+      match /settings/{settingId} {
+        allow read, write: if false;
+      }
+      match /goals/{goalId} {
+        allow read, write: if false;
+      }
+      match /weeks/{weekId} {
+        allow read, write: if false;
+      }
+      match /auditLogs/{logId} {
+        allow read, write: if false;
+      }
+      match /idempotency/{entryId} {
+        allow read, write: if false;
+      }
+      match /{other=**} { allow read, write: if false; }
+    }
+    match /{other=**} { allow read, write: if false; }
+  }
+}

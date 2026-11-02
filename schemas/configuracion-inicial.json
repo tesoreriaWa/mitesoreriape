@@ -1,0 +1,31 @@
+{
+  "projectName": "Tesorería del Salón",
+  "timezone": "America/Lima",
+  "currency": "PEN",
+  "weeklyContributionCents": 500,
+  "firstFriday": "2026-11-06",
+  "lastFriday": null,
+  "openingBalanceCents": 9400,
+  "openingBalanceType": "opening_balance",
+  "openingCount": 1,
+  "openingCountedAsNewContribution": false,
+  "openingBalanceProvenance": "no_desglosada",
+  "openingCountedAsMemberPayment": false,
+  "openingRecordedAt": null,
+  "goal": {
+    "enabled": false,
+    "name": null,
+    "targetCents": null,
+    "deadline": null
+  },
+  "members": [],
+  "pausedFridays": [],
+  "roles": {
+    "owner": "treasurer",
+    "assistant": "delegate",
+    "viewer": "member"
+  },
+  "latePaymentsPolicy": "oldest_due_first",
+  "unassignedRemainderPolicy": "ask_credit_or_donation",
+  "liveFinanceWritesEnabled": false
+}

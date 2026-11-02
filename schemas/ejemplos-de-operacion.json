@@ -1,0 +1,46 @@
+{
+  "NOTE": "DOCUMENTOS DE EJEMPLO, NO IMPORTAR A PRODUCCION COMO MOVIMIENTOS REALES",
+  "opening": {
+    "kind": "opening_balance",
+    "deltaCents": 9400,
+    "memberUid": null,
+    "countsAsNewPayment": false,
+    "openingRecordedAt": "ELEGIR_EN_ARQUEO"
+  },
+  "payment": {
+    "kind": "payment",
+    "memberUid": "uid-ejemplo",
+    "receivedDate": "2026-11-06",
+    "amountCents": 1000,
+    "distribution": [
+      {
+        "type": "week",
+        "weekId": "2026-11-06",
+        "amountCents": 500
+      },
+      {
+        "type": "week",
+        "weekId": "2026-11-13",
+        "amountCents": 500
+      }
+    ],
+    "cashDeltaCents": 1000
+  },
+  "exampleWithRemainder": {
+    "kind": "payment",
+    "receivedDate": "2026-11-06",
+    "amountCents": 800,
+    "distribution": [
+      {
+        "type": "week",
+        "weekId": "2026-11-06",
+        "amountCents": 500
+      },
+      {
+        "type": "credit",
+        "amountCents": 300
+      }
+    ],
+    "cashDeltaCents": 800
+  }
+}
