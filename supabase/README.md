@@ -8,7 +8,8 @@
    `migrations/20261103_0005_member_access_controls.sql`,
    `migrations/20261103_0006_contributions.sql` y
    `migrations/20261104_0007_create_groups.sql` y
-   `migrations/20261104_0008_operational_ledger.sql`.
+   `migrations/20261104_0008_operational_ledger.sql` y
+   `migrations/20261104_0009_participant_crud_and_manual_allocations.sql`.
 2. Inicia sesión en la web con `arielxdo163@gmail.com` mediante Google.
 3. La pantalla de acceso protegido mostrará el botón **Activar superadministrador**. Púlsalo una sola vez.
 
@@ -26,6 +27,8 @@ Tras iniciar sesión, una cuenta que todavía no pertenece a ningún grupo puede
 ## Padrón, caja y meta reales
 
 La migración `20261104_0008_operational_ledger.sql` agrega fichas de participantes independientes de las cuentas Google, la vinculación manual de una ficha con una cuenta registrada, movimientos de caja con motivo visible para el grupo y una meta anual persistente. Debe ejecutarse después de todas las migraciones anteriores.
+
+La migración `20261104_0009_participant_crud_and_manual_allocations.sql` añade edición y eliminación segura de fichas, edición/anulación trazable de aportes y la selección manual de cuántas semanas cubrirá un recibo. El excedente queda guardado como saldo a favor, sin cubrir semanas adicionales de manera automática.
 
 ## Fotos de perfil con ImgBB
 
