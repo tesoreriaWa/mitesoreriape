@@ -60,6 +60,10 @@ export default function App() {
   const [groupId,setGroupId] = useState<string|null>(null);
   const [groupCode,setGroupCode] = useState<string|null>(null);
   const [groupName,setGroupName] = useState('Mi salón');
+  const [groupLogo,setGroupLogo] = useState<string|null>(null);
+  const [groupLogoFile,setGroupLogoFile] = useState<File|null>(null);
+  const [brandingSaving,setBrandingSaving] = useState(false);
+  const [brandingMessage,setBrandingMessage] = useState<string|null>(null);
   const [firstFriday,setFirstFriday] = useState('2026-11-06');
   const [weeklyDueCents,setWeeklyDueCents] = useState(500);
   const [requireApproval,setRequireApproval] = useState(false);
@@ -165,6 +169,18 @@ export default function App() {
     setProfileSaving(false);
     if (error) { setProfileMessage('No se pudo guardar el perfil. Ejecuta la migración de perfil y vuelve a intentarlo.'); return; }
     setProfileAvatar(avatarUrl); setProfilePhoto(null); setProfileMessage('Perfil actualizado correctamente.');
+  }
+  async function saveGroupBranding() {
+    if (!groupId || !groupLogoFile) { setBrandingMessage('Selecciona el logo de la institución.'); return; }
+    if (!groupLogoFile.type.startsWith('image/') || groupLogoFile.size > 2 * 1024 * 1024) { setBrandingMessage('El logo debe ser una imagen de hasta 2 MB.'); return; }
+    setBrandingSaving(true); setBrandingMessage(null);
+    const form = new FormData(); form.append('file', groupLogoFile);
+    const { data, error: uploadError } = await supabase.functions.invoke<{url:string}>('upload-profile-image', { body:form });
+    if (uploadError || !data?.url) { setBrandingSaving(false); setBrandingMessage('No se pudo subir el logo. Revisa la Edge Function de ImgBB.'); return; }
+    const { error } = await supabase.rpc('update_group_branding', { p_group_id:groupId, p_institution_logo_url:data.url });
+    setBrandingSaving(false);
+    if (error) { setBrandingMessage('No se pudo guardar el logo. Ejecuta la migración de personalización.'); return; }
+    setGroupLogo(data.url); setGroupLogoFile(null); setBrandingMessage('Logo institucional actualizado.');
   }
   async function copyInviteLink() {
     if (!groupCode) return;
@@ -365,9 +381,10 @@ export default function App() {
   }
   useEffect(() => {
     if (!groupId) return;
-    void supabase.from('groups').select('name, join_code, first_friday, weekly_due_cents, require_membership_approval').eq('id', groupId).maybeSingle().then(({ data }) => {
+    void supabase.from('groups').select('name, join_code, first_friday, weekly_due_cents, require_membership_approval, institution_logo_url').eq('id', groupId).maybeSingle().then(({ data }) => {
       setGroupCode(data?.join_code ?? null);
       setGroupName(data?.name ?? 'Mi salón');
+      setGroupLogo(data?.institution_logo_url ?? null);
       if (data?.first_friday) setFirstFriday(data.first_friday);
       if (data?.weekly_due_cents) setWeeklyDueCents(data.weekly_due_cents);
       setRequireApproval(data?.require_membership_approval ?? false);
@@ -425,6 +442,7 @@ export default function App() {
     {open&&<button className="mobile-backdrop" aria-label="Cerrar menú" onClick={()=>setOpen(false)}/>}
     <div className="main-column">
       <header className="topbar"><button className="menu-button" aria-label="Abrir menú" onClick={()=>setOpen(true)}><Menu size={22}/></button><div className="breadcrumbs">Mi salón <span>/</span> {tab==='inicio'?'Resumen':nav.find(x=>x.key===tab)?.label??'Tesorería'}</div><div className="topbar-right">{authLoading?<span className="auth-status">Verificando sesión…</span>:user?<><span className="account-chip" title={user.email??undefined}><span>{(user.user_metadata.full_name ?? user.email ?? 'C').slice(0,1).toUpperCase()}</span>{user.user_metadata.full_name ?? user.email ?? 'Cuenta conectada'}</span><button className="auth-button" onClick={()=>void signOut()}><LogOut size={15}/> Salir</button></>:<button className="auth-button" onClick={()=>void signInWithGoogle()}><Icon icon="logos:google-icon"/> Entrar con Google</button>}</div></header>
+      {groupLogo&&<div className="institution-mark" title={`Logo de ${groupName}`}><img src={groupLogo} alt={`Logo de ${groupName}`}/></div>}
       <main className="content">
         {authError&&<div className="auth-error" role="alert">{authError}</div>}
         {tab==='inicio'&&<>
@@ -443,6 +461,7 @@ export default function App() {
         {tab==='meta'&&role==='treasurer'&&<Page heading="Meta anual" desc="Define un objetivo real y guarda la meta para que el grupo vea el avance." icon={<Goal size={27}/>}><div className="form-grid"><div className="form-card"><label htmlFor="goalname">Nombre de la meta</label><input id="goalname" value={goalName} onChange={e=>{setGoalName(e.target.value);setGoalSaved(false);}}/><label htmlFor="target">Monto objetivo (S/)</label><input type="number" min="1" step="0.01" id="target" placeholder="Por ejemplo, 1500" value={goal} onChange={e=>{setGoal(e.target.value);setGoalSaved(false);}}/><label htmlFor="goaldate">Fecha objetivo</label><input type="date" id="goaldate" value={goalDate} onChange={e=>{setGoalDate(e.target.value);setGoalSaved(false);}}/><button className="primary" disabled={!(Number(goal)>0)} onClick={()=>void saveGoal()}><CheckCircle2 size={16}/>{goalSaved?'Guardar cambios':'Guardar meta anual'}</button>{goalMessage&&<p className="payment-message">{goalMessage}</p>}</div><div className="form-card highlight"><h3>Proyección visual</h3><div className="preview-line"><span>Saldo en caja</span><strong>{money(cashBalance)}</strong></div><div className="preview-line"><span>Meta ingresada</span><strong>{Number(goal)>0?money(Math.round(Number(goal)*100)):'Sin configurar'}</strong></div><div className="preview-line"><span>Porcentaje</span><strong>{progress===null?'—':`${progress}%`}</strong></div><div className="preview-line"><span>Fecha</span><strong>{goalDate}</strong></div><p className="mini">El avance usa el saldo actual de caja y se actualiza con cada movimiento.</p></div></div></Page>}
         {tab==='configuracion'&&role==='treasurer'&&<Page heading="Administración del salón" desc="Gestiona el acceso, período y controles del grupo." icon={<Settings2 size={27}/>}><section className="admin-settings-grid"><article className="admin-settings-card featured"><div className="settings-card-icon"><Icon icon="solar:users-group-rounded-linear"/></div><div><p className="settings-overline">GRUPO ACTIVO</p><h2>{groupName}</h2><p>Comparte un enlace: el código viaja ya configurado y cada cuenta nueva se incorpora según la política que elijas.</p></div><button className="settings-code settings-share" onClick={()=>void copyInviteLink()} disabled={!groupCode}><span>{inviteCopied?'ENLACE COPIADO':'COPIAR ENLACE DE INVITACIÓN'}</span><strong>{groupCode ?? 'Cargando…'}</strong></button></article><article className="admin-settings-card join-policy-card"><div className="settings-card-icon"><Icon icon="solar:user-check-rounded-linear"/></div><div><p className="settings-overline">ACCESOS</p><h2>Ingreso rápido</h2><p>{requireApproval?'Las nuevas cuentas quedarán pendientes para que las revises.':'Los compañeros que usen tu enlace entrarán de inmediato como integrantes.'}</p></div><label className="policy-switch"><input type="checkbox" checked={requireApproval} onChange={event=>void saveJoinPolicy(event.target.checked)} disabled={joinPolicySaving}/><span aria-hidden="true"/><b>Revisar cada ingreso</b></label>{joinPolicyMessage&&<p className="join-policy-message" role="status">{joinPolicyMessage}</p>}</article><article className="admin-settings-card schedule-card"><div className="settings-card-icon"><Icon icon="solar:calendar-linear"/></div><div><p className="settings-overline">PERÍODO ACTIVO</p><h2>Cuota y calendario</h2><p>Elige el primer viernes y define la cuota semanal del grupo.</p></div><div className="schedule-form"><label>Primer viernes<input type="date" value={firstFriday} onChange={event=>setFirstFriday(event.target.value)}/></label><label>Cuota semanal (S/)<input type="number" min="1" step="0.01" value={(weeklyDueCents / 100).toFixed(2)} onChange={event=>setWeeklyDueCents(Math.max(100,Math.round(Number(event.target.value || 0)*100)))} /></label><button className="primary" onClick={()=>void saveGroupSchedule()} disabled={scheduleSaving}>{scheduleSaving?'Guardando…':'Guardar período'}</button></div>{scheduleMessage&&<p className="schedule-message" role="status">{scheduleMessage}</p>}</article><article className="admin-settings-card"><div className="settings-card-icon"><Icon icon="solar:shield-keyhole-linear"/></div><div><p className="settings-overline">SEGURIDAD</p><h2>Roles y trazabilidad</h2><p>Solo los tesoreros gestionan caja; los cambios importantes quedarán registrados.</p></div><span className="settings-status">Protegido</span></article></section></Page>}
         {tab==='perfil'&&<Page heading="Mi perfil" desc="Actualiza tus datos y tu foto de perfil de forma segura." icon={<Users size={27}/>}><div className="form-grid"><section className="form-card profile-card"><div className="profile-avatar-preview">{profileAvatar?<img src={profileAvatar} alt="Foto de perfil"/>:(profileName||user.email||'U').slice(0,1).toUpperCase()}</div><label htmlFor="my-profile-photo">Foto de perfil <small>(PNG, JPG o WebP · hasta 2 MB)</small></label><input id="my-profile-photo" type="file" accept="image/png,image/jpeg,image/webp" onChange={event=>setProfilePhoto(event.target.files?.[0] ?? null)}/>{profilePhoto&&<p className="mini">Nueva imagen: {profilePhoto.name}</p>}</section><section className="form-card"><label htmlFor="my-profile-name">Nombre completo</label><input id="my-profile-name" value={profileName} onChange={event=>setProfileName(event.target.value)} maxLength={100}/><label htmlFor="my-profile-phone">Número de celular</label><input id="my-profile-phone" value={profilePhone} onChange={event=>setProfilePhone(event.target.value)} maxLength={24}/><p className="mini">Tu correo de Google no se modifica desde aquí.</p><button className="primary" disabled={profileSaving} onClick={()=>void saveProfile()}>{profileSaving?'Guardando…':'Guardar perfil'}</button>{profileMessage&&<p className="payment-message">{profileMessage}</p>}</section></div></Page>}
+        {tab==='configuracion'&&role==='treasurer'&&<section className="branding-settings"><div className="branding-preview">{groupLogo?<img src={groupLogo} alt={`Logo actual de ${groupName}`}/>:<Icon icon="solar:buildings-2-linear"/>}</div><div><p className="settings-overline">IDENTIDAD DEL GRUPO</p><h2>Logo de la institución</h2><p>Se mostrará junto al panel del grupo. Puedes reemplazarlo cuando lo necesites.</p></div><label className="branding-upload">Elegir logo<input type="file" accept="image/png,image/jpeg,image/webp" onChange={event=>setGroupLogoFile(event.target.files?.[0] ?? null)}/></label><button className="primary" disabled={brandingSaving||!groupLogoFile} onClick={()=>void saveGroupBranding()}>{brandingSaving?'Subiendo…':'Guardar logo'}</button>{brandingMessage&&<p className="payment-message">{brandingMessage}</p>}</section>}
       </main>
     </div>
   </div>;

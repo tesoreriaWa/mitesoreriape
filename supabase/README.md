@@ -10,7 +10,8 @@
    `migrations/20261104_0007_create_groups.sql` y
    `migrations/20261104_0008_operational_ledger.sql` y
    `migrations/20261104_0009_participant_crud_and_manual_allocations.sql` y
-   `migrations/20261104_0010_profile_settings.sql`.
+   `migrations/20261104_0010_profile_settings.sql` y
+   `migrations/20261104_0011_group_branding.sql`.
 2. Inicia sesión en la web con `arielxdo163@gmail.com` mediante Google.
 3. La pantalla de acceso protegido mostrará el botón **Activar superadministrador**. Púlsalo una sola vez.
 
@@ -32,6 +33,8 @@ La migración `20261104_0008_operational_ledger.sql` agrega fichas de participan
 La migración `20261104_0009_participant_crud_and_manual_allocations.sql` añade edición y eliminación segura de fichas, edición/anulación trazable de aportes y la selección manual de cuántas semanas cubrirá un recibo. El excedente queda guardado como saldo a favor, sin cubrir semanas adicionales de manera automática.
 
 La migración `20261104_0010_profile_settings.sql` permite que cada cuenta actualice de forma segura su nombre, celular y foto de perfil desde **Mi perfil**. La imagen se sube con la Edge Function `upload-profile-image` y el secreto de ImgBB no llega al navegador.
+
+La migración `20261104_0011_group_branding.sql` permite al tesorero subir y reemplazar el logo institucional del grupo desde **Administración del salón**.
 
 ## Fotos de perfil con ImgBB
 
