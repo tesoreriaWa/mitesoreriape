@@ -1,0 +1,23 @@
+# Supabase: primer administrador
+
+1. En el panel de Supabase, abre **SQL Editor** y ejecuta cada archivo completo, en este orden:
+   `migrations/20261102_0001_platform_roles.sql`,
+   `migrations/20261102_0002_group_join_and_profiles.sql`,
+   `migrations/20261103_0003_group_schedule.sql`,
+   `migrations/20261103_0004_fix_list_students.sql` y
+   `migrations/20261103_0005_member_access_controls.sql`.
+2. Inicia sesión en la web con `arielxdo163@gmail.com` mediante Google.
+3. La pantalla de acceso protegido mostrará el botón **Activar superadministrador**. Púlsalo una sola vez.
+
+El procedimiento es idempotente y solo acepta el correo Google configurado. Asigna:
+
+- `superadmin` para administrar otros salones en el futuro.
+- `treasurer` y `active` dentro de su primer salón.
+
+No colocar nunca una `service_role` en el frontend. Las tablas no conceden inserción o actualización directa desde el navegador.
+
+## Fotos de perfil con ImgBB
+
+La app no envía la clave de ImgBB al navegador. Antes de permitir fotos, define `IMGBB_API_KEY` como secreto de Supabase y despliega `functions/upload-profile-image`. Usa en el comando el valor privado entregado para este proyecto; no lo guardes en `.env`, código ni Git.
+
+En el detalle de la función `upload-profile-image`, desactiva **Verify JWT with legacy secret**. La función valida explícitamente el JWT del usuario en su código mediante `auth.getUser()`, por lo que mantiene acceso exclusivo para usuarios autenticados y evita incompatibilidades con las nuevas claves publicables de Supabase.
