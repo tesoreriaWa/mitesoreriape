@@ -19,7 +19,7 @@ import './contributions.css';
 import './group-onboarding.css';
 import './operational-ledger.css';
 
-type Tab = 'inicio'|'compañeros'|'detalle-aportes'|'abonos'|'calendario'|'caja'|'reportes'|'meta'|'configuracion'|'misaportes';
+type Tab = 'inicio'|'compañeros'|'detalle-aportes'|'abonos'|'calendario'|'caja'|'reportes'|'meta'|'configuracion'|'misaportes'|'perfil';
 type Role = 'treasurer'|'delegate'|'member';
 type Student = { participant_id: string; full_name: string; avatar_url: string|null };
 type GroupMember = Student & { phone:string|null; linked_user_id:string|null; linked_email:string|null; total_cents:number; last_payment_on:string|null };
@@ -36,7 +36,8 @@ const modules: {key: Tab; label: string; icon: typeof LayoutDashboard}[] = [
   { key:'caja',label:'Movimientos de caja',icon:Wallet },
   { key:'reportes',label:'Reportes',icon:FileText },
   { key:'meta',label:'Meta anual',icon:Goal },
-  { key:'configuracion',label:'Administración',icon:Settings2 }
+  { key:'configuracion',label:'Administración',icon:Settings2 },
+  { key:'perfil',label:'Mi perfil',icon:Users }
 ];
 const money = (n:number) => formatPEN(n);
 const formatDate = (value:string) => {
@@ -103,6 +104,12 @@ export default function App() {
   const [cashDate,setCashDate] = useState(()=>new Date().toISOString().slice(0,10));
   const [cashSaving,setCashSaving] = useState(false);
   const [cashMessage,setCashMessage] = useState<string|null>(null);
+  const [profileName,setProfileName] = useState('');
+  const [profilePhone,setProfilePhone] = useState('');
+  const [profileAvatar,setProfileAvatar] = useState<string|null>(null);
+  const [profilePhoto,setProfilePhoto] = useState<File|null>(null);
+  const [profileSaving,setProfileSaving] = useState(false);
+  const [profileMessage,setProfileMessage] = useState<string|null>(null);
   const [amount,setAmount] = useState('10');
   const [paymentWeeks,setPaymentWeeks] = useState('1');
   const [editingContributionId,setEditingContributionId] = useState<string|null>(null);
@@ -135,6 +142,29 @@ export default function App() {
   async function signOut() {
     const { error } = await supabase.auth.signOut();
     if (error) setAuthError('No se pudo cerrar la sesión. Inténtalo otra vez.');
+  }
+  useEffect(() => {
+    if (!user) { setProfileName(''); setProfilePhone(''); setProfileAvatar(null); return; }
+    setProfileName(user.user_metadata.full_name ?? '');
+    void supabase.from('profiles').select('full_name,phone,avatar_url').eq('id',user.id).maybeSingle().then(({ data }) => {
+      if (data) { setProfileName(data.full_name ?? user.user_metadata.full_name ?? ''); setProfilePhone(data.phone ?? ''); setProfileAvatar(data.avatar_url ?? null); }
+    });
+  }, [user?.id]);
+  async function saveProfile() {
+    if (!user || profileName.trim().length < 3) { setProfileMessage('Ingresa tu nombre completo.'); return; }
+    setProfileSaving(true); setProfileMessage(null);
+    let avatarUrl = profileAvatar;
+    if (profilePhoto) {
+      if (!profilePhoto.type.startsWith('image/') || profilePhoto.size > 2 * 1024 * 1024) { setProfileSaving(false); setProfileMessage('La foto debe ser una imagen de hasta 2 MB.'); return; }
+      const form = new FormData(); form.append('file', profilePhoto);
+      const { data, error } = await supabase.functions.invoke<{url:string}>('upload-profile-image', { body:form });
+      if (error || !data?.url) { setProfileSaving(false); setProfileMessage('No se pudo subir la foto. Revisa la Edge Function de ImgBB.'); return; }
+      avatarUrl = data.url;
+    }
+    const { error } = await supabase.rpc('update_my_profile', { p_full_name:profileName, p_phone:profilePhone || null, p_avatar_url:avatarUrl });
+    setProfileSaving(false);
+    if (error) { setProfileMessage('No se pudo guardar el perfil. Ejecuta la migración de perfil y vuelve a intentarlo.'); return; }
+    setProfileAvatar(avatarUrl); setProfilePhoto(null); setProfileMessage('Perfil actualizado correctamente.');
   }
   async function copyInviteLink() {
     if (!groupCode) return;
@@ -376,7 +406,7 @@ export default function App() {
   const publicGoal = Number(goal)>0 ? Math.round(Number(goal)*100):null;
   const progress = publicGoal ? progressPercent(cashBalance,publicGoal) : null;
   const isAdmin = accessRole !== 'member';
-  const nav = isAdmin?modules.filter(m => accessRole === 'treasurer'||(m.key !== 'configuracion' && m.key !== 'meta')):[{key:'inicio' as Tab,label:'Mi inicio',icon:LayoutDashboard},{key:'misaportes' as Tab,label:'Mis aportes',icon:BookOpen},{key:'caja' as Tab,label:'Caja del grupo',icon:Wallet}];
+  const nav = isAdmin?modules.filter(m => accessRole === 'treasurer'||(m.key !== 'configuracion' && m.key !== 'meta')):[{key:'inicio' as Tab,label:'Mi inicio',icon:LayoutDashboard},{key:'misaportes' as Tab,label:'Mis aportes',icon:BookOpen},{key:'caja' as Tab,label:'Caja del grupo',icon:Wallet},{key:'perfil' as Tab,label:'Mi perfil',icon:Users}];
   const selectTab=(next:Tab)=>{setTab(next);setOpen(false);};
   const numericAmount = Number(amount);
   const amountCents = Number.isFinite(numericAmount)?Math.round(numericAmount*100):0;
@@ -412,6 +442,7 @@ export default function App() {
         {tab==='misaportes'&&<Page heading="Mis aportes" desc="Tu historial es privado: solo tú y la tesorería pueden consultarlo." icon={<BookOpen size={27}/>}><section className="contribution-detail"><div className="detail-history"><h2>Semanas y aportes registrados</h2>{myContributionHistory.length?<div>{myContributionHistory.map(item=><article key={`${item.contribution_id}-${item.due_date}`}><div><strong>Viernes {formatDate(item.due_date)}</strong><span>Recibido el {formatDate(item.received_on)}{item.note?` · ${item.note}`:''}</span></div><b>{money(item.applied_cents)}</b></article>)}</div>:<p>Tu cuenta aún no está vinculada a una ficha del padrón, o todavía no hay aportes registrados. Pide al tesorero que la relacione con tu ficha.</p>}</div></section></Page>}
         {tab==='meta'&&role==='treasurer'&&<Page heading="Meta anual" desc="Define un objetivo real y guarda la meta para que el grupo vea el avance." icon={<Goal size={27}/>}><div className="form-grid"><div className="form-card"><label htmlFor="goalname">Nombre de la meta</label><input id="goalname" value={goalName} onChange={e=>{setGoalName(e.target.value);setGoalSaved(false);}}/><label htmlFor="target">Monto objetivo (S/)</label><input type="number" min="1" step="0.01" id="target" placeholder="Por ejemplo, 1500" value={goal} onChange={e=>{setGoal(e.target.value);setGoalSaved(false);}}/><label htmlFor="goaldate">Fecha objetivo</label><input type="date" id="goaldate" value={goalDate} onChange={e=>{setGoalDate(e.target.value);setGoalSaved(false);}}/><button className="primary" disabled={!(Number(goal)>0)} onClick={()=>void saveGoal()}><CheckCircle2 size={16}/>{goalSaved?'Guardar cambios':'Guardar meta anual'}</button>{goalMessage&&<p className="payment-message">{goalMessage}</p>}</div><div className="form-card highlight"><h3>Proyección visual</h3><div className="preview-line"><span>Saldo en caja</span><strong>{money(cashBalance)}</strong></div><div className="preview-line"><span>Meta ingresada</span><strong>{Number(goal)>0?money(Math.round(Number(goal)*100)):'Sin configurar'}</strong></div><div className="preview-line"><span>Porcentaje</span><strong>{progress===null?'—':`${progress}%`}</strong></div><div className="preview-line"><span>Fecha</span><strong>{goalDate}</strong></div><p className="mini">El avance usa el saldo actual de caja y se actualiza con cada movimiento.</p></div></div></Page>}
         {tab==='configuracion'&&role==='treasurer'&&<Page heading="Administración del salón" desc="Gestiona el acceso, período y controles del grupo." icon={<Settings2 size={27}/>}><section className="admin-settings-grid"><article className="admin-settings-card featured"><div className="settings-card-icon"><Icon icon="solar:users-group-rounded-linear"/></div><div><p className="settings-overline">GRUPO ACTIVO</p><h2>{groupName}</h2><p>Comparte un enlace: el código viaja ya configurado y cada cuenta nueva se incorpora según la política que elijas.</p></div><button className="settings-code settings-share" onClick={()=>void copyInviteLink()} disabled={!groupCode}><span>{inviteCopied?'ENLACE COPIADO':'COPIAR ENLACE DE INVITACIÓN'}</span><strong>{groupCode ?? 'Cargando…'}</strong></button></article><article className="admin-settings-card join-policy-card"><div className="settings-card-icon"><Icon icon="solar:user-check-rounded-linear"/></div><div><p className="settings-overline">ACCESOS</p><h2>Ingreso rápido</h2><p>{requireApproval?'Las nuevas cuentas quedarán pendientes para que las revises.':'Los compañeros que usen tu enlace entrarán de inmediato como integrantes.'}</p></div><label className="policy-switch"><input type="checkbox" checked={requireApproval} onChange={event=>void saveJoinPolicy(event.target.checked)} disabled={joinPolicySaving}/><span aria-hidden="true"/><b>Revisar cada ingreso</b></label>{joinPolicyMessage&&<p className="join-policy-message" role="status">{joinPolicyMessage}</p>}</article><article className="admin-settings-card schedule-card"><div className="settings-card-icon"><Icon icon="solar:calendar-linear"/></div><div><p className="settings-overline">PERÍODO ACTIVO</p><h2>Cuota y calendario</h2><p>Elige el primer viernes y define la cuota semanal del grupo.</p></div><div className="schedule-form"><label>Primer viernes<input type="date" value={firstFriday} onChange={event=>setFirstFriday(event.target.value)}/></label><label>Cuota semanal (S/)<input type="number" min="1" step="0.01" value={(weeklyDueCents / 100).toFixed(2)} onChange={event=>setWeeklyDueCents(Math.max(100,Math.round(Number(event.target.value || 0)*100)))} /></label><button className="primary" onClick={()=>void saveGroupSchedule()} disabled={scheduleSaving}>{scheduleSaving?'Guardando…':'Guardar período'}</button></div>{scheduleMessage&&<p className="schedule-message" role="status">{scheduleMessage}</p>}</article><article className="admin-settings-card"><div className="settings-card-icon"><Icon icon="solar:shield-keyhole-linear"/></div><div><p className="settings-overline">SEGURIDAD</p><h2>Roles y trazabilidad</h2><p>Solo los tesoreros gestionan caja; los cambios importantes quedarán registrados.</p></div><span className="settings-status">Protegido</span></article></section></Page>}
+        {tab==='perfil'&&<Page heading="Mi perfil" desc="Actualiza tus datos y tu foto de perfil de forma segura." icon={<Users size={27}/>}><div className="form-grid"><section className="form-card profile-card"><div className="profile-avatar-preview">{profileAvatar?<img src={profileAvatar} alt="Foto de perfil"/>:(profileName||user.email||'U').slice(0,1).toUpperCase()}</div><label htmlFor="my-profile-photo">Foto de perfil <small>(PNG, JPG o WebP · hasta 2 MB)</small></label><input id="my-profile-photo" type="file" accept="image/png,image/jpeg,image/webp" onChange={event=>setProfilePhoto(event.target.files?.[0] ?? null)}/>{profilePhoto&&<p className="mini">Nueva imagen: {profilePhoto.name}</p>}</section><section className="form-card"><label htmlFor="my-profile-name">Nombre completo</label><input id="my-profile-name" value={profileName} onChange={event=>setProfileName(event.target.value)} maxLength={100}/><label htmlFor="my-profile-phone">Número de celular</label><input id="my-profile-phone" value={profilePhone} onChange={event=>setProfilePhone(event.target.value)} maxLength={24}/><p className="mini">Tu correo de Google no se modifica desde aquí.</p><button className="primary" disabled={profileSaving} onClick={()=>void saveProfile()}>{profileSaving?'Guardando…':'Guardar perfil'}</button>{profileMessage&&<p className="payment-message">{profileMessage}</p>}</section></div></Page>}
       </main>
     </div>
   </div>;
