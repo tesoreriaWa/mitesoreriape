@@ -1,0 +1,10 @@
+.onboarding-card{width:min(100%,680px)}
+.onboarding-choices{display:grid;gap:12px;margin-top:24px}
+.onboarding-choice{min-height:82px;border-radius:13px;padding:16px 17px;text-align:left;display:flex;align-items:center;gap:13px;width:100%}
+.onboarding-choice>svg:first-child{font-size:27px;flex:0 0 auto}.onboarding-choice>svg:last-child{margin-left:auto;flex:0 0 auto}
+.onboarding-choice span{display:grid;gap:4px}.onboarding-choice b{font-size:14px}.onboarding-choice small{font-size:11px;font-weight:500;line-height:1.35;opacity:.78}
+.onboarding-choice.secondary{background:#fff;color:#176d5d;border:1px solid #c5e2d7}.onboarding-choice.secondary:hover{background:#f2fbf7}
+.onboarding-back{margin:6px auto 0;border:0;background:transparent;color:#47736c;font-weight:700;font-size:12px;display:block}.onboarding-back:hover{text-decoration:underline}
+.create-group-form{display:grid;gap:0}.create-group-form>label:first-child{margin-top:0}.onboarding-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}.onboarding-grid label{margin:0!important}.onboarding-grid input{margin-top:7px}
+.onboarding-switch{display:flex!important;align-items:flex-start;gap:10px;margin:20px 0 5px!important;padding:12px;border:1px solid #d5e8df;border-radius:10px;background:#f5fbf8;cursor:pointer}.onboarding-switch input{position:absolute;opacity:0}.onboarding-switch>span{height:19px;width:35px;flex:0 0 35px;border-radius:20px;background:#b9cbc4;position:relative;margin-top:1px;transition:.2s}.onboarding-switch>span:after{content:'';position:absolute;top:3px;left:3px;width:13px;height:13px;border-radius:50%;background:#fff;transition:.2s}.onboarding-switch input:checked+span{background:#159072}.onboarding-switch input:checked+span:after{transform:translateX(16px)}.onboarding-switch div{display:grid;gap:3px}.onboarding-switch b{font-size:12px;color:#234a43}.onboarding-switch small{font-size:10px;line-height:1.4;color:#658078}
+@media(max-width:600px){.onboarding-card{padding:33px 24px}.onboarding-grid{grid-template-columns:1fr}.onboarding-choice{padding:14px}.onboarding-choice small{max-width:210px}}

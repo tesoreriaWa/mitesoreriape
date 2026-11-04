@@ -4,8 +4,10 @@
    `migrations/20261102_0001_platform_roles.sql`,
    `migrations/20261102_0002_group_join_and_profiles.sql`,
    `migrations/20261103_0003_group_schedule.sql`,
-   `migrations/20261103_0004_fix_list_students.sql` y
-   `migrations/20261103_0005_member_access_controls.sql`.
+   `migrations/20261103_0004_fix_list_students.sql`,
+   `migrations/20261103_0005_member_access_controls.sql`,
+   `migrations/20261103_0006_contributions.sql` y
+   `migrations/20261104_0007_create_groups.sql`.
 2. Inicia sesión en la web con `arielxdo163@gmail.com` mediante Google.
 3. La pantalla de acceso protegido mostrará el botón **Activar superadministrador**. Púlsalo una sola vez.
 
@@ -15,6 +17,10 @@ El procedimiento es idempotente y solo acepta el correo Google configurado. Asig
 - `treasurer` y `active` dentro de su primer salón.
 
 No colocar nunca una `service_role` en el frontend. Las tablas no conceden inserción o actualización directa desde el navegador.
+
+## Crear grupos por cuenta
+
+Tras iniciar sesión, una cuenta que todavía no pertenece a ningún grupo puede elegir **Crear mi grupo**. La migración `20261104_0007_create_groups.sql` crea el salón, genera su código de invitación y asigna a esa cuenta el rol `treasurer` activo solo para ese grupo. No concede el rol global `superadmin`.
 
 ## Fotos de perfil con ImgBB
 
