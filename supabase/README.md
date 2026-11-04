@@ -7,7 +7,8 @@
    `migrations/20261103_0004_fix_list_students.sql`,
    `migrations/20261103_0005_member_access_controls.sql`,
    `migrations/20261103_0006_contributions.sql` y
-   `migrations/20261104_0007_create_groups.sql`.
+   `migrations/20261104_0007_create_groups.sql` y
+   `migrations/20261104_0008_operational_ledger.sql`.
 2. Inicia sesión en la web con `arielxdo163@gmail.com` mediante Google.
 3. La pantalla de acceso protegido mostrará el botón **Activar superadministrador**. Púlsalo una sola vez.
 
@@ -21,6 +22,10 @@ No colocar nunca una `service_role` en el frontend. Las tablas no conceden inser
 ## Crear grupos por cuenta
 
 Tras iniciar sesión, una cuenta que todavía no pertenece a ningún grupo puede elegir **Crear mi grupo**. La migración `20261104_0007_create_groups.sql` crea el salón, genera su código de invitación y asigna a esa cuenta el rol `treasurer` activo solo para ese grupo. No concede el rol global `superadmin`.
+
+## Padrón, caja y meta reales
+
+La migración `20261104_0008_operational_ledger.sql` agrega fichas de participantes independientes de las cuentas Google, la vinculación manual de una ficha con una cuenta registrada, movimientos de caja con motivo visible para el grupo y una meta anual persistente. Debe ejecutarse después de todas las migraciones anteriores.
 
 ## Fotos de perfil con ImgBB
 
