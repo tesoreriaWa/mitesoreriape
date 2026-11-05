@@ -11,7 +11,8 @@
    `migrations/20261104_0008_operational_ledger.sql` y
    `migrations/20261104_0009_participant_crud_and_manual_allocations.sql` y
    `migrations/20261104_0010_profile_settings.sql` y
-   `migrations/20261104_0011_group_branding.sql`.
+   `migrations/20261104_0011_group_branding.sql` y
+   `migrations/20261105_0012_security_hardening.sql`.
 2. Inicia sesión en la web con `arielxdo163@gmail.com` mediante Google.
 3. La pantalla de acceso protegido mostrará el botón **Activar superadministrador**. Púlsalo una sola vez.
 
@@ -41,3 +42,9 @@ La migración `20261104_0011_group_branding.sql` permite al tesorero subir y ree
 La app no envía la clave de ImgBB al navegador. Antes de permitir fotos, define `IMGBB_API_KEY` como secreto de Supabase y despliega `functions/upload-profile-image`. Usa en el comando el valor privado entregado para este proyecto; no lo guardes en `.env`, código ni Git.
 
 En el detalle de la función `upload-profile-image`, desactiva **Verify JWT with legacy secret**. La función valida explícitamente el JWT del usuario en su código mediante `auth.getUser()`, por lo que mantiene acceso exclusivo para usuarios autenticados y evita incompatibilidades con las nuevas claves publicables de Supabase.
+
+## Endurecimiento de seguridad
+
+La migración `20261105_0012_security_hardening.sql` es obligatoria antes de publicar esta versión. Cierra funciones internas, elimina rutas antiguas de registro, limita mutaciones por cuenta, impide duplicar aportes o movimientos por reintentos y deja las operaciones de dinero, padrón, metas y logo exclusivamente para `treasurer` o `superadmin`.
+
+Después de ejecutar la migración, vuelve a desplegar la Edge Function `upload-profile-image`, ya que ahora valida la firma binaria de PNG, JPG y WebP y reclama un cupo de subida antes de llamar a ImgBB. Mantén el secreto `IMGBB_API_KEY` configurado solo en Supabase. Las fotos se redimensionan a WebP de 512 px en el navegador antes de subirlas.
