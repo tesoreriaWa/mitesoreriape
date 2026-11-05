@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { Icon } from '@iconify/react';
 import { ArrowRight, BookOpen, CalendarDays, CheckCircle2, ClipboardList, Clock3, Coins, Copy, FileText, Goal, LayoutDashboard, LockKeyhole, LogOut, Menu, Plus, Settings2, ShieldCheck, Users, Wallet, X } from 'lucide-react';
@@ -49,6 +49,21 @@ const plusDays = (value:string, days:number) => {
   const date = new Date(year, month - 1, day + days);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 };
+async function prepareImageForUpload(file:File) {
+  if (!['image/jpeg','image/png','image/webp'].includes(file.type) || file.size > 8 * 1024 * 1024) {
+    throw new Error('Selecciona una imagen JPG, PNG o WebP de hasta 8 MB.');
+  }
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 512 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const blob = await new Promise<Blob|null>(resolve => canvas.toBlob(resolve, 'image/webp', 0.82));
+  if (!blob || blob.size > 2 * 1024 * 1024) throw new Error('No pudimos optimizar la imagen. Prueba una foto más liviana.');
+  return new File([blob], `${file.name.replace(/\.[^.]+$/, '') || 'imagen'}.webp`, { type:'image/webp' });
+}
 export default function App() {
   const [role,setRole] = useState<Role>('treasurer');
   const [user,setUser] = useState<User|null>(null);
@@ -117,6 +132,23 @@ export default function App() {
   const [amount,setAmount] = useState('10');
   const [paymentWeeks,setPaymentWeeks] = useState('1');
   const [editingContributionId,setEditingContributionId] = useState<string|null>(null);
+  const [goalSaving,setGoalSaving] = useState(false);
+  const inFlightActions = useRef(new Set<string>());
+  const idempotencyKeys = useRef<Record<string,{ fingerprint:string; key:string }>>({});
+  const beginAction = (action:string) => {
+    if (inFlightActions.current.has(action)) return false;
+    inFlightActions.current.add(action);
+    return true;
+  };
+  const endAction = (action:string) => { inFlightActions.current.delete(action); };
+  const getRequestKey = (action:string, fingerprint:string) => {
+    const previous = idempotencyKeys.current[action];
+    if (previous?.fingerprint === fingerprint) return previous.key;
+    const key = crypto.randomUUID();
+    idempotencyKeys.current[action] = { fingerprint, key };
+    return key;
+  };
+  const clearRequestKey = (action:string) => { delete idempotencyKeys.current[action]; };
   useEffect(() => {
     let active = true;
     void supabase.auth.getSession().then(({ data, error }) => {
@@ -156,29 +188,35 @@ export default function App() {
   }, [user?.id]);
   async function saveProfile() {
     if (!user || profileName.trim().length < 3) { setProfileMessage('Ingresa tu nombre completo.'); return; }
+    if (!beginAction('profile')) return;
     setProfileSaving(true); setProfileMessage(null);
     let avatarUrl = profileAvatar;
     if (profilePhoto) {
-      if (!profilePhoto.type.startsWith('image/') || profilePhoto.size > 2 * 1024 * 1024) { setProfileSaving(false); setProfileMessage('La foto debe ser una imagen de hasta 2 MB.'); return; }
-      const form = new FormData(); form.append('file', profilePhoto);
+      let optimizedPhoto:File;
+      try { optimizedPhoto = await prepareImageForUpload(profilePhoto); }
+      catch (error) { setProfileSaving(false); endAction('profile'); setProfileMessage(error instanceof Error ? error.message : 'No se pudo preparar la foto.'); return; }
+      const form = new FormData(); form.append('file', optimizedPhoto);
       const { data, error } = await supabase.functions.invoke<{url:string}>('upload-profile-image', { body:form });
-      if (error || !data?.url) { setProfileSaving(false); setProfileMessage('No se pudo subir la foto. Revisa la Edge Function de ImgBB.'); return; }
+      if (error || !data?.url) { setProfileSaving(false); endAction('profile'); setProfileMessage('No se pudo subir la foto. Revisa la Edge Function de ImgBB.'); return; }
       avatarUrl = data.url;
     }
     const { error } = await supabase.rpc('update_my_profile', { p_full_name:profileName, p_phone:profilePhone || null, p_avatar_url:avatarUrl });
-    setProfileSaving(false);
+    setProfileSaving(false); endAction('profile');
     if (error) { setProfileMessage('No se pudo guardar el perfil. Ejecuta la migración de perfil y vuelve a intentarlo.'); return; }
     setProfileAvatar(avatarUrl); setProfilePhoto(null); setProfileMessage('Perfil actualizado correctamente.');
   }
   async function saveGroupBranding() {
     if (!groupId || !groupLogoFile) { setBrandingMessage('Selecciona el logo de la institución.'); return; }
-    if (!groupLogoFile.type.startsWith('image/') || groupLogoFile.size > 2 * 1024 * 1024) { setBrandingMessage('El logo debe ser una imagen de hasta 2 MB.'); return; }
+    if (!beginAction('branding')) return;
     setBrandingSaving(true); setBrandingMessage(null);
-    const form = new FormData(); form.append('file', groupLogoFile);
+    let optimizedLogo:File;
+    try { optimizedLogo = await prepareImageForUpload(groupLogoFile); }
+    catch (error) { setBrandingSaving(false); endAction('branding'); setBrandingMessage(error instanceof Error ? error.message : 'No se pudo preparar el logo.'); return; }
+    const form = new FormData(); form.append('file', optimizedLogo);
     const { data, error: uploadError } = await supabase.functions.invoke<{url:string}>('upload-profile-image', { body:form });
-    if (uploadError || !data?.url) { setBrandingSaving(false); setBrandingMessage('No se pudo subir el logo. Revisa la Edge Function de ImgBB.'); return; }
+    if (uploadError || !data?.url) { setBrandingSaving(false); endAction('branding'); setBrandingMessage('No se pudo subir el logo. Revisa la Edge Function de ImgBB.'); return; }
     const { error } = await supabase.rpc('update_group_branding', { p_group_id:groupId, p_institution_logo_url:data.url });
-    setBrandingSaving(false);
+    setBrandingSaving(false); endAction('branding');
     if (error) { setBrandingMessage('No se pudo guardar el logo. Ejecuta la migración de personalización.'); return; }
     setGroupLogo(data.url); setGroupLogoFile(null); setBrandingMessage('Logo institucional actualizado.');
   }
@@ -201,6 +239,7 @@ export default function App() {
       setScheduleMessage('Selecciona un viernes para iniciar el período.');
       return;
     }
+    if (!beginAction('schedule')) return;
     setScheduleMessage(null);
     setScheduleSaving(true);
     const { error } = await supabase.rpc('update_group_schedule', {
@@ -208,76 +247,97 @@ export default function App() {
       p_first_friday: firstFriday,
       p_weekly_due_cents: weeklyDueCents,
     });
-    setScheduleSaving(false);
+    setScheduleSaving(false); endAction('schedule');
     setScheduleMessage(error ? 'No pudimos guardar. Ejecuta la migración de configuración y vuelve a intentarlo.' : 'Período y cuota actualizados para el grupo.');
   }
   async function saveJoinPolicy(nextValue:boolean) {
     if (!groupId) return;
+    if (!beginAction('join-policy')) return;
     setRequireApproval(nextValue);
     setJoinPolicySaving(true);
     setJoinPolicyMessage(null);
     const { error } = await supabase.rpc('update_group_join_policy', { p_group_id: groupId, p_require_approval: nextValue });
-    setJoinPolicySaving(false);
+    setJoinPolicySaving(false); endAction('join-policy');
     if (error) { setRequireApproval(!nextValue); setJoinPolicyMessage('No pudimos guardar la política de ingreso. Ejecuta la migración de controles de miembros.'); return; }
     setJoinPolicyMessage(nextValue ? 'Las nuevas solicitudes requerirán tu aprobación.' : 'Ingreso rápido activado: las invitaciones nuevas entrarán al grupo de inmediato.');
   }
   async function approveMember(memberId:string) {
     if (!groupId) return;
+    if (!beginAction(`approve-${memberId}`)) return;
     const { error } = await supabase.rpc('approve_group_member', { p_group_id: groupId, p_user_id: memberId });
+    endAction(`approve-${memberId}`);
     if (!error) { setParticipantMessage('Cuenta aprobada. Ya puedes vincularla con una ficha del padrón.'); void loadLinkableAccounts(); }
   }
   async function recordContribution() {
     if (!groupId || !selectedStudent || amountCents < 1) { setPaymentMessage('Selecciona un integrante e ingresa un monto válido.'); return; }
+    if (!beginAction('contribution')) return;
     setPaymentSaving(true); setPaymentMessage(null);
     const weeks = Math.max(1, Math.min(104, Math.floor(Number(paymentWeeks) || 1)));
+    const requestKey = getRequestKey('contribution', [groupId,selectedStudent,amountCents,paymentDate,paymentNote,weeks,editingContributionId ?? 'new'].join('|'));
     const { error } = editingContributionId
       ? await supabase.rpc('update_participant_contribution', { p_group_id:groupId, p_contribution_id:editingContributionId, p_amount_cents:amountCents, p_received_on:paymentDate, p_note:paymentNote || null, p_weeks_to_cover:weeks })
-      : await supabase.rpc('record_participant_contribution', { p_group_id:groupId, p_participant_id:selectedStudent, p_amount_cents:amountCents, p_received_on:paymentDate, p_note:paymentNote || null, p_weeks_to_cover:weeks });
-    setPaymentSaving(false);
+      : await supabase.rpc('record_participant_contribution', { p_group_id:groupId, p_participant_id:selectedStudent, p_amount_cents:amountCents, p_received_on:paymentDate, p_note:paymentNote || null, p_weeks_to_cover:weeks, p_request_key:requestKey });
+    setPaymentSaving(false); endAction('contribution');
     if (error) { setPaymentMessage('No se pudo registrar el aporte. Ejecuta la migración operativa y vuelve a intentarlo.'); return; }
+    clearRequestKey('contribution');
     setPaymentMessage(editingContributionId?'Aporte actualizado y semanas recalculadas.':'Aporte registrado. El total y las semanas cubiertas ya se actualizaron.');
     setPaymentNote(''); setEditingContributionId(null); void refreshFinancialSummary();
     if (selectedMember) void loadParticipantReceipts(selectedMember.participant_id);
   }
   async function createParticipant() {
     if (!groupId || participantName.trim().length < 3) { setParticipantMessage('Ingresa el nombre completo del compañero.'); return; }
+    if (!beginAction('participant')) return;
     setParticipantSaving(true); setParticipantMessage(null);
     const { error } = await supabase.rpc('create_group_participant', { p_group_id:groupId, p_full_name:participantName, p_phone:participantPhone || null, p_avatar_url:null });
-    setParticipantSaving(false);
+    setParticipantSaving(false); endAction('participant');
     if (error) { setParticipantMessage('No se pudo crear la ficha. Ejecuta la migración operativa y vuelve a intentarlo.'); return; }
     setParticipantName(''); setParticipantPhone(''); setParticipantMessage('Ficha creada. Ya puedes registrar sus aportes o vincular su cuenta cuando inicie sesión.');
     void loadParticipants(); void refreshFinancialSummary();
   }
   async function updateParticipant() {
     if (!groupId || !editingParticipantId || editingParticipantName.trim().length < 3) return;
+    if (!beginAction('participant')) return;
+    setParticipantSaving(true);
     const { error } = await supabase.rpc('update_group_participant', { p_group_id:groupId, p_participant_id:editingParticipantId, p_full_name:editingParticipantName, p_phone:editingParticipantPhone || null, p_avatar_url:null });
+    setParticipantSaving(false); endAction('participant');
     setParticipantMessage(error?'No se pudo actualizar la ficha.':'Ficha actualizada correctamente.');
     if (!error) { setEditingParticipantId(null); void loadParticipants(); }
   }
   async function deleteParticipant(participantId:string) {
     if (!groupId || !window.confirm('¿Eliminar esta ficha? Si ya tiene aportes, se archivará para conservar el historial contable.')) return;
+    if (!beginAction(`participant-${participantId}`)) return;
     const { data, error } = await supabase.rpc('delete_group_participant', { p_group_id:groupId, p_participant_id:participantId });
+    endAction(`participant-${participantId}`);
     setParticipantMessage(error?'No se pudo eliminar la ficha.':data==='archived'?'La ficha se archivó porque conserva aportes registrados.':'Ficha eliminada.');
     if (!error) { void loadParticipants(); void refreshFinancialSummary(); }
   }
   async function linkParticipant(participantId:string, accountId:string) {
     if (!groupId || !accountId) return;
+    if (!beginAction(`link-${participantId}`)) return;
     const { error } = await supabase.rpc('link_participant_account', { p_group_id:groupId, p_participant_id:participantId, p_user_id:accountId });
+    endAction(`link-${participantId}`);
     setParticipantMessage(error ? 'No se pudo vincular la cuenta. Verifica que esté activa y no vinculada.' : 'Cuenta vinculada: ahora verá únicamente su propio historial.');
     if (!error) { void loadParticipants(); void loadLinkableAccounts(); }
   }
   async function saveGoal() {
     if (!groupId || Number(goal) <= 0) { setGoalMessage('Ingresa un monto objetivo válido.'); return; }
+    if (!beginAction('goal')) return;
+    setGoalSaving(true); setGoalMessage(null);
     const { error } = await supabase.rpc('save_group_goal', { p_group_id:groupId, p_name:goalName, p_target_cents:Math.round(Number(goal)*100), p_target_date:goalDate });
+    setGoalSaving(false); endAction('goal');
     if (error) { setGoalMessage('No se pudo guardar la meta. Ejecuta la migración operativa y vuelve a intentarlo.'); return; }
     setGoalSaved(true); setGoalMessage('Meta anual guardada para todo el grupo.');
   }
   async function saveCashMovement() {
     if (!groupId || !cashReason.trim() || Math.round(Number(cashAmount)*100) < 1) { setCashMessage('Indica un monto y el motivo del movimiento.'); return; }
+    if (!beginAction('cash')) return;
     setCashSaving(true); setCashMessage(null);
-    const { error } = await supabase.rpc('record_cash_movement', { p_group_id:groupId, p_movement_type:cashType, p_amount_cents:Math.round(Number(cashAmount)*100), p_reason:cashReason, p_occurred_on:cashDate });
-    setCashSaving(false);
+    const cashCents = Math.round(Number(cashAmount)*100);
+    const requestKey = getRequestKey('cash', [groupId,cashType,cashCents,cashReason,cashDate].join('|'));
+    const { error } = await supabase.rpc('record_cash_movement', { p_group_id:groupId, p_movement_type:cashType, p_amount_cents:cashCents, p_reason:cashReason, p_occurred_on:cashDate, p_request_key:requestKey });
+    setCashSaving(false); endAction('cash');
     if (error) { setCashMessage('No se pudo registrar el movimiento. Ejecuta la migración operativa y vuelve a intentarlo.'); return; }
+    clearRequestKey('cash');
     setCashAmount(''); setCashReason(''); setCashMessage('Movimiento registrado y visible para el grupo.');
     void refreshFinancialSummary(); void loadCashMovements();
   }
@@ -317,7 +377,9 @@ export default function App() {
     if (!groupId || !selectedMember) return;
     const reason = window.prompt('Motivo de la anulación (quedará visible en caja):');
     if (!reason) return;
+    if (!beginAction(`void-${receiptId}`)) return;
     const { error } = await supabase.rpc('void_participant_contribution', { p_group_id:groupId, p_contribution_id:receiptId, p_reason:reason });
+    endAction(`void-${receiptId}`);
     if (error) { setPaymentMessage('No se pudo anular el aporte.'); return; }
     setPaymentMessage('Aporte anulado. La caja y las semanas cubiertas fueron recalculadas.');
     void refreshFinancialSummary(); void loadParticipantReceipts(selectedMember.participant_id);
@@ -422,8 +484,10 @@ export default function App() {
   useEffect(() => { if (groupId && tab === 'caja') void loadCashMovements(); }, [groupId, tab]);
   const publicGoal = Number(goal)>0 ? Math.round(Number(goal)*100):null;
   const progress = publicGoal ? progressPercent(cashBalance,publicGoal) : null;
-  const isAdmin = accessRole !== 'member';
-  const nav = isAdmin?modules.filter(m => accessRole === 'treasurer'||(m.key !== 'configuracion' && m.key !== 'meta')):[{key:'inicio' as Tab,label:'Mi inicio',icon:LayoutDashboard},{key:'misaportes' as Tab,label:'Mis aportes',icon:BookOpen},{key:'caja' as Tab,label:'Caja del grupo',icon:Wallet},{key:'perfil' as Tab,label:'Mi perfil',icon:Users}];
+  const isAdmin = accessRole === 'treasurer';
+  const nav = isAdmin
+    ? modules
+    : [{key:'inicio' as Tab,label:'Mi inicio',icon:LayoutDashboard},{key:'misaportes' as Tab,label:'Mis aportes',icon:BookOpen},{key:'caja' as Tab,label:'Caja del grupo',icon:Wallet},{key:'perfil' as Tab,label:'Mi perfil',icon:Users}];
   const selectTab=(next:Tab)=>{setTab(next);setOpen(false);};
   const numericAmount = Number(amount);
   const amountCents = Number.isFinite(numericAmount)?Math.round(numericAmount*100):0;
@@ -458,9 +522,9 @@ export default function App() {
         {tab==='caja'&&<Page heading="Caja y movimientos" desc="Cada ingreso, gasto o ajuste queda registrado con su motivo para todo el grupo." icon={<Wallet size={27}/>}><div className="form-grid"><div><div className="stat-card major compact"><div className="stat-top">Saldo actual en caja <Wallet size={19}/></div><div className="stat-value">{money(cashBalance)}</div><div className="stat-detail">Aportes, gastos y ajustes registrados</div></div>{isAdmin&&<div className="form-card"><h3>Registrar salida o ajuste</h3><label>Tipo de movimiento<select value={cashType} onChange={event=>setCashType(event.target.value as typeof cashType)}><option value="expense">Gasto</option><option value="adjustment_in">Ajuste a favor</option><option value="adjustment_out">Ajuste en contra</option></select></label><label>Monto (S/)<input type="number" min="0.01" step="0.01" value={cashAmount} onChange={event=>setCashAmount(event.target.value)}/></label><label>Motivo<input value={cashReason} maxLength={300} placeholder="Ej. Compra de materiales" onChange={event=>setCashReason(event.target.value)}/></label><label>Fecha<input type="date" value={cashDate} onChange={event=>setCashDate(event.target.value)}/></label><button className="primary" disabled={cashSaving} onClick={()=>void saveCashMovement()}>{cashSaving?'Guardando…':'Guardar movimiento'}</button>{cashMessage&&<p className="payment-message">{cashMessage}</p>}</div>}</div><div className="form-card cash-history"><h3>Movimientos del grupo</h3>{cashMovements.length?<div>{cashMovements.map(movement=><article className="cash-movement" key={movement.id}><div><strong>{movement.movement_type==='contribution'?'Aporte':movement.movement_type==='expense'?'Gasto':movement.movement_type==='adjustment_in'?'Ajuste a favor':'Ajuste en contra'}</strong><span>{formatDate(movement.occurred_on)} · {movement.reason}</span></div><b className={movement.movement_type==='expense'||movement.movement_type==='adjustment_out'?'negative':'positive'}>{movement.movement_type==='expense'||movement.movement_type==='adjustment_out'?'-':'+'}{money(Number(movement.amount_cents))}</b></article>)}</div>:<p className="mini">Aún no hay movimientos registrados.</p>}</div></div></Page>}
         {tab==='reportes'&&<Page heading="Reportes" desc="Resumen de caja, cobros, gastos, deudas y exportación." icon={<FileText size={27}/>}><Empty title="No hay información contable todavía" message="Una vez activada la app real, aparecerán reportes por semana, persona y periodo. Los exportables respetarán los permisos del usuario."/></Page>}
         {tab==='misaportes'&&<Page heading="Mis aportes" desc="Tu historial es privado: solo tú y la tesorería pueden consultarlo." icon={<BookOpen size={27}/>}><section className="contribution-detail"><div className="detail-history"><h2>Semanas y aportes registrados</h2>{myContributionHistory.length?<div>{myContributionHistory.map(item=><article key={`${item.contribution_id}-${item.due_date}`}><div><strong>Viernes {formatDate(item.due_date)}</strong><span>Recibido el {formatDate(item.received_on)}{item.note?` · ${item.note}`:''}</span></div><b>{money(item.applied_cents)}</b></article>)}</div>:<p>Tu cuenta aún no está vinculada a una ficha del padrón, o todavía no hay aportes registrados. Pide al tesorero que la relacione con tu ficha.</p>}</div></section></Page>}
-        {tab==='meta'&&role==='treasurer'&&<Page heading="Meta anual" desc="Define un objetivo real y guarda la meta para que el grupo vea el avance." icon={<Goal size={27}/>}><div className="form-grid"><div className="form-card"><label htmlFor="goalname">Nombre de la meta</label><input id="goalname" value={goalName} onChange={e=>{setGoalName(e.target.value);setGoalSaved(false);}}/><label htmlFor="target">Monto objetivo (S/)</label><input type="number" min="1" step="0.01" id="target" placeholder="Por ejemplo, 1500" value={goal} onChange={e=>{setGoal(e.target.value);setGoalSaved(false);}}/><label htmlFor="goaldate">Fecha objetivo</label><input type="date" id="goaldate" value={goalDate} onChange={e=>{setGoalDate(e.target.value);setGoalSaved(false);}}/><button className="primary" disabled={!(Number(goal)>0)} onClick={()=>void saveGoal()}><CheckCircle2 size={16}/>{goalSaved?'Guardar cambios':'Guardar meta anual'}</button>{goalMessage&&<p className="payment-message">{goalMessage}</p>}</div><div className="form-card highlight"><h3>Proyección visual</h3><div className="preview-line"><span>Saldo en caja</span><strong>{money(cashBalance)}</strong></div><div className="preview-line"><span>Meta ingresada</span><strong>{Number(goal)>0?money(Math.round(Number(goal)*100)):'Sin configurar'}</strong></div><div className="preview-line"><span>Porcentaje</span><strong>{progress===null?'—':`${progress}%`}</strong></div><div className="preview-line"><span>Fecha</span><strong>{goalDate}</strong></div><p className="mini">El avance usa el saldo actual de caja y se actualiza con cada movimiento.</p></div></div></Page>}
+        {tab==='meta'&&role==='treasurer'&&<Page heading="Meta anual" desc="Define un objetivo real y guarda la meta para que el grupo vea el avance." icon={<Goal size={27}/>}><div className="form-grid"><div className="form-card"><label htmlFor="goalname">Nombre de la meta</label><input id="goalname" value={goalName} onChange={e=>{setGoalName(e.target.value);setGoalSaved(false);}}/><label htmlFor="target">Monto objetivo (S/)</label><input type="number" min="1" step="0.01" id="target" placeholder="Por ejemplo, 1500" value={goal} onChange={e=>{setGoal(e.target.value);setGoalSaved(false);}}/><label htmlFor="goaldate">Fecha objetivo</label><input type="date" id="goaldate" value={goalDate} onChange={e=>{setGoalDate(e.target.value);setGoalSaved(false);}}/><button className="primary" disabled={goalSaving||!(Number(goal)>0)} onClick={()=>void saveGoal()}><CheckCircle2 size={16}/>{goalSaving?'Guardando…':goalSaved?'Guardar cambios':'Guardar meta anual'}</button>{goalMessage&&<p className="payment-message">{goalMessage}</p>}</div><div className="form-card highlight"><h3>Proyección visual</h3><div className="preview-line"><span>Saldo en caja</span><strong>{money(cashBalance)}</strong></div><div className="preview-line"><span>Meta ingresada</span><strong>{Number(goal)>0?money(Math.round(Number(goal)*100)):'Sin configurar'}</strong></div><div className="preview-line"><span>Porcentaje</span><strong>{progress===null?'—':`${progress}%`}</strong></div><div className="preview-line"><span>Fecha</span><strong>{goalDate}</strong></div><p className="mini">El avance usa el saldo actual de caja y se actualiza con cada movimiento.</p></div></div></Page>}
         {tab==='configuracion'&&role==='treasurer'&&<Page heading="Administración del salón" desc="Gestiona el acceso, período y controles del grupo." icon={<Settings2 size={27}/>}><section className="admin-settings-grid"><article className="admin-settings-card featured"><div className="settings-card-icon"><Icon icon="solar:users-group-rounded-linear"/></div><div><p className="settings-overline">GRUPO ACTIVO</p><h2>{groupName}</h2><p>Comparte un enlace: el código viaja ya configurado y cada cuenta nueva se incorpora según la política que elijas.</p></div><button className="settings-code settings-share" onClick={()=>void copyInviteLink()} disabled={!groupCode}><span>{inviteCopied?'ENLACE COPIADO':'COPIAR ENLACE DE INVITACIÓN'}</span><strong>{groupCode ?? 'Cargando…'}</strong></button></article><article className="admin-settings-card join-policy-card"><div className="settings-card-icon"><Icon icon="solar:user-check-rounded-linear"/></div><div><p className="settings-overline">ACCESOS</p><h2>Ingreso rápido</h2><p>{requireApproval?'Las nuevas cuentas quedarán pendientes para que las revises.':'Los compañeros que usen tu enlace entrarán de inmediato como integrantes.'}</p></div><label className="policy-switch"><input type="checkbox" checked={requireApproval} onChange={event=>void saveJoinPolicy(event.target.checked)} disabled={joinPolicySaving}/><span aria-hidden="true"/><b>Revisar cada ingreso</b></label>{joinPolicyMessage&&<p className="join-policy-message" role="status">{joinPolicyMessage}</p>}</article><article className="admin-settings-card schedule-card"><div className="settings-card-icon"><Icon icon="solar:calendar-linear"/></div><div><p className="settings-overline">PERÍODO ACTIVO</p><h2>Cuota y calendario</h2><p>Elige el primer viernes y define la cuota semanal del grupo.</p></div><div className="schedule-form"><label>Primer viernes<input type="date" value={firstFriday} onChange={event=>setFirstFriday(event.target.value)}/></label><label>Cuota semanal (S/)<input type="number" min="1" step="0.01" value={(weeklyDueCents / 100).toFixed(2)} onChange={event=>setWeeklyDueCents(Math.max(100,Math.round(Number(event.target.value || 0)*100)))} /></label><button className="primary" onClick={()=>void saveGroupSchedule()} disabled={scheduleSaving}>{scheduleSaving?'Guardando…':'Guardar período'}</button></div>{scheduleMessage&&<p className="schedule-message" role="status">{scheduleMessage}</p>}</article><article className="admin-settings-card"><div className="settings-card-icon"><Icon icon="solar:shield-keyhole-linear"/></div><div><p className="settings-overline">SEGURIDAD</p><h2>Roles y trazabilidad</h2><p>Solo los tesoreros gestionan caja; los cambios importantes quedarán registrados.</p></div><span className="settings-status">Protegido</span></article></section></Page>}
-        {tab==='perfil'&&<Page heading="Mi perfil" desc="Actualiza tus datos y tu foto de perfil de forma segura." icon={<Users size={27}/>}><div className="form-grid"><section className="form-card profile-card"><div className="profile-avatar-preview">{profileAvatar?<img src={profileAvatar} alt="Foto de perfil"/>:(profileName||user.email||'U').slice(0,1).toUpperCase()}</div><label htmlFor="my-profile-photo">Foto de perfil <small>(PNG, JPG o WebP · hasta 2 MB)</small></label><input id="my-profile-photo" type="file" accept="image/png,image/jpeg,image/webp" onChange={event=>setProfilePhoto(event.target.files?.[0] ?? null)}/>{profilePhoto&&<p className="mini">Nueva imagen: {profilePhoto.name}</p>}</section><section className="form-card"><label htmlFor="my-profile-name">Nombre completo</label><input id="my-profile-name" value={profileName} onChange={event=>setProfileName(event.target.value)} maxLength={100}/><label htmlFor="my-profile-phone">Número de celular</label><input id="my-profile-phone" value={profilePhone} onChange={event=>setProfilePhone(event.target.value)} maxLength={24}/><p className="mini">Tu correo de Google no se modifica desde aquí.</p><button className="primary" disabled={profileSaving} onClick={()=>void saveProfile()}>{profileSaving?'Guardando…':'Guardar perfil'}</button>{profileMessage&&<p className="payment-message">{profileMessage}</p>}</section></div></Page>}
+        {tab==='perfil'&&<Page heading="Mi perfil" desc="Actualiza tus datos y tu foto de perfil de forma segura." icon={<Users size={27}/>}><div className="form-grid"><section className="form-card profile-card"><div className="profile-avatar-preview">{profileAvatar?<img src={profileAvatar} alt="Foto de perfil"/>:(profileName||user.email||'U').slice(0,1).toUpperCase()}</div><label htmlFor="my-profile-photo">Foto de perfil <small>(PNG, JPG o WebP · hasta 8 MB; se optimiza al subir)</small></label><input id="my-profile-photo" type="file" accept="image/png,image/jpeg,image/webp" onChange={event=>setProfilePhoto(event.target.files?.[0] ?? null)}/>{profilePhoto&&<p className="mini">Nueva imagen: {profilePhoto.name}</p>}</section><section className="form-card"><label htmlFor="my-profile-name">Nombre completo</label><input id="my-profile-name" value={profileName} onChange={event=>setProfileName(event.target.value)} maxLength={100}/><label htmlFor="my-profile-phone">Número de celular</label><input id="my-profile-phone" value={profilePhone} onChange={event=>setProfilePhone(event.target.value)} maxLength={24}/><p className="mini">Tu correo de Google no se modifica desde aquí.</p><button className="primary" disabled={profileSaving} onClick={()=>void saveProfile()}>{profileSaving?'Guardando…':'Guardar perfil'}</button>{profileMessage&&<p className="payment-message">{profileMessage}</p>}</section></div></Page>}
         {tab==='configuracion'&&role==='treasurer'&&<section className="branding-settings"><div className="branding-preview">{groupLogo?<img src={groupLogo} alt={`Logo actual de ${groupName}`}/>:<Icon icon="solar:buildings-2-linear"/>}</div><div><p className="settings-overline">IDENTIDAD DEL GRUPO</p><h2>Logo de la institución</h2><p>Se mostrará junto al panel del grupo. Puedes reemplazarlo cuando lo necesites.</p></div><label className="branding-upload">Elegir logo<input type="file" accept="image/png,image/jpeg,image/webp" onChange={event=>setGroupLogoFile(event.target.files?.[0] ?? null)}/></label><button className="primary" disabled={brandingSaving||!groupLogoFile} onClick={()=>void saveGroupBranding()}>{brandingSaving?'Subiendo…':'Guardar logo'}</button>{brandingMessage&&<p className="payment-message">{brandingMessage}</p>}</section>}
       </main>
     </div>
@@ -525,8 +589,8 @@ function PendingAccess({email,message,loading,canBootstrap,onBootstrap,onJoin,on
   const [formError,setFormError] = useState<string|null>(null);
   async function uploadAvatar() {
     if (!photo) return null;
-    if (!photo.type.startsWith('image/') || photo.size > 2 * 1024 * 1024) throw new Error('La foto debe ser una imagen de hasta 2 MB.');
-    const form = new FormData(); form.append('file', photo);
+    const optimizedPhoto = await prepareImageForUpload(photo);
+    const form = new FormData(); form.append('file', optimizedPhoto);
     const { data, error } = await supabase.functions.invoke<{url:string}>('upload-profile-image', { body: form });
     if (error || !data?.url) throw new Error('No pudimos subir la foto. Puedes continuar sin ella o revisar la configuración de imágenes.');
     return data.url;
@@ -546,6 +610,6 @@ function PendingAccess({email,message,loading,canBootstrap,onBootstrap,onJoin,on
     try { await onCreateGroup({groupName:newGroupName,fullName,phone,firstFriday:newGroupFirstFriday,weeklyDueCents:dueCents,requireApproval:newGroupApproval,avatarUrl:await uploadAvatar()}); } catch (error) { setFormError(error instanceof Error ? error.message : 'No se pudo crear el grupo.'); }
     setSubmitting(false);
   }
-  const personalFields = <><label htmlFor="full-name">Nombre completo</label><input id="full-name" value={fullName} onChange={event=>setFullName(event.target.value)} maxLength={100} required/><label htmlFor="phone">Número de celular</label><input id="phone" type="tel" value={phone} onChange={event=>setPhone(event.target.value)} maxLength={24} required/><label htmlFor="profile-photo">Foto de perfil <small>(opcional, hasta 2 MB)</small></label><input id="profile-photo" type="file" accept="image/png,image/jpeg,image/webp" onChange={event=>setPhoto(event.target.files?.[0] ?? null)}/></>;
+  const personalFields = <><label htmlFor="full-name">Nombre completo</label><input id="full-name" value={fullName} onChange={event=>setFullName(event.target.value)} maxLength={100} required/><label htmlFor="phone">Número de celular</label><input id="phone" type="tel" value={phone} onChange={event=>setPhone(event.target.value)} maxLength={24} required/><label htmlFor="profile-photo">Foto de perfil <small>(opcional, JPG/PNG/WebP hasta 8 MB; se optimiza al subir)</small></label><input id="profile-photo" type="file" accept="image/png,image/jpeg,image/webp" onChange={event=>setPhoto(event.target.files?.[0] ?? null)}/></>;
   return <main className="pending-access"><div className="pending-card onboarding-card"><img src="/mascot-optimized/leyendo.webp" alt="Mascota revisando la configuración del grupo"/><p className="landing-kicker"><span/> ACCESO PROTEGIDO</p><h1>{loading?'Comprobando tu acceso…':mode==='create'?'Crea la tesorería de tu salón':mode==='join'?'Únete al grupo de tu salón':'¿Cómo quieres empezar?'}</h1><p>Entraste como <strong>{email}</strong>. {mode==='choice'?'Elige si deseas administrar un grupo nuevo o unirte al de tu salón.':'Tus datos se protegen y solo el grupo tendrá acceso a su información.'}</p>{message&&<p className="pending-message">{message}</p>}{canBootstrap?<button className="landing-primary" onClick={()=>void onBootstrap()} disabled={loading}><ShieldCheck size={17}/>Activar superadministrador</button>:mode==='choice'?<div className="onboarding-choices"><button className="onboarding-choice primary" onClick={()=>setMode('create')}><Icon icon="solar:users-group-rounded-linear"/><span><b>Crear mi grupo</b><small>Seré tesorero y podré invitar compañeros.</small></span><ArrowRight size={17}/></button><button className="onboarding-choice secondary" onClick={()=>setMode('join')}><Icon icon="solar:user-plus-linear"/><span><b>Unirme a un grupo</b><small>Tengo un código o enlace de invitación.</small></span><ArrowRight size={17}/></button></div>:mode==='join'?<form className="join-form" onSubmit={event=>void submitJoin(event)}>{inviteGroupCode?<div className="invite-group-notice"><Icon icon="solar:users-group-rounded-linear"/><div><span>INVITACIÓN PARA EL GRUPO</span><strong>{groupCode}</strong></div></div>:<><label htmlFor="group-code"><Icon icon="solar:password-minimalistic-input-linear"/> Código del grupo</label><input id="group-code" value={groupCode} onChange={event=>setGroupCode(event.target.value.toUpperCase())} maxLength={12} required/></>}{personalFields}{formError&&<p className="form-error" role="alert">{formError}</p>}<button className="landing-primary" disabled={submitting||loading||!groupCode}><Icon icon="solar:user-plus-linear"/>{submitting?'Enviando…':'Confirmar ingreso'}</button>{!inviteGroupCode&&<button type="button" className="onboarding-back" onClick={()=>setMode('choice')}>← Elegir otra opción</button>}</form>:<form className="join-form create-group-form" onSubmit={event=>void submitCreate(event)}><label htmlFor="new-group-name">Nombre de tu salón o grupo</label><input id="new-group-name" value={newGroupName} onChange={event=>setNewGroupName(event.target.value)} placeholder="Ej. 5.º B — Promoción 2026" maxLength={80} required/>{personalFields}<div className="onboarding-grid"><label>Cuota semanal (S/)<input type="number" min="1" step="0.01" value={newGroupDue} onChange={event=>setNewGroupDue(event.target.value)} required/></label><label>Primer viernes<input type="date" value={newGroupFirstFriday} onChange={event=>setNewGroupFirstFriday(event.target.value)} required/></label></div><label className="onboarding-switch"><input type="checkbox" checked={newGroupApproval} onChange={event=>setNewGroupApproval(event.target.checked)}/><span aria-hidden="true"/><div><b>Revisar cada ingreso</b><small>{newGroupApproval?'Los compañeros quedarán pendientes hasta que los apruebes.':'Ingreso rápido: los invitados activos entran sin revisión.'}</small></div></label>{formError&&<p className="form-error" role="alert">{formError}</p>}<button className="landing-primary" disabled={submitting||loading}><ShieldCheck size={17}/>{submitting?'Creando grupo…':'Crear grupo y ser tesorero'}</button><button type="button" className="onboarding-back" onClick={()=>setMode('choice')}>← Elegir otra opción</button></form>}<button className="pending-signout" onClick={()=>void onSignOut()}><LogOut size={15}/>Cerrar sesión</button></div></main>;
 }
