@@ -27,6 +27,7 @@ type LinkableAccount = { user_id:string; full_name:string; email:string; status:
 type CashMovement = { id:string; movement_type:'opening'|'contribution'|'expense'|'adjustment_in'|'adjustment_out'; amount_cents:number; reason:string; occurred_on:string };
 type ContributionHistory = { contribution_id:string; received_on:string; amount_cents:number; note:string|null; due_date:string; applied_cents:number };
 type ContributionReceipt = { id:string; received_on:string; amount_cents:number; note:string|null; weeks_to_cover:number|null; credit_cents:number };
+type ContributionConfirmation = { participantName:string; amountCents:number; weeks:number; updated:boolean };
 const INITIAL_SUPERADMIN_EMAIL = 'arielxdo163@gmail.com';
 const modules: {key: Tab; label: string; icon: typeof LayoutDashboard}[] = [
   { key:'inicio',label:'Resumen',icon:LayoutDashboard },
@@ -132,6 +133,7 @@ export default function App() {
   const [amount,setAmount] = useState('10');
   const [paymentWeeks,setPaymentWeeks] = useState('1');
   const [editingContributionId,setEditingContributionId] = useState<string|null>(null);
+  const [contributionConfirmation,setContributionConfirmation] = useState<ContributionConfirmation|null>(null);
   const [goalSaving,setGoalSaving] = useState(false);
   const inFlightActions = useRef(new Set<string>());
   const idempotencyKeys = useRef<Record<string,{ fingerprint:string; key:string }>>({});
@@ -273,14 +275,17 @@ export default function App() {
     if (!beginAction('contribution')) return;
     setPaymentSaving(true); setPaymentMessage(null);
     const weeks = Math.max(1, Math.min(104, Math.floor(Number(paymentWeeks) || 1)));
+    const isEditing = Boolean(editingContributionId);
+    const participantName = students.find(student=>student.participant_id===selectedStudent)?.full_name ?? 'el participante';
     const requestKey = getRequestKey('contribution', [groupId,selectedStudent,amountCents,paymentDate,paymentNote,weeks,editingContributionId ?? 'new'].join('|'));
-    const { error } = editingContributionId
+    const { error } = isEditing
       ? await supabase.rpc('update_participant_contribution', { p_group_id:groupId, p_contribution_id:editingContributionId, p_amount_cents:amountCents, p_received_on:paymentDate, p_note:paymentNote || null, p_weeks_to_cover:weeks })
       : await supabase.rpc('record_participant_contribution', { p_group_id:groupId, p_participant_id:selectedStudent, p_amount_cents:amountCents, p_received_on:paymentDate, p_note:paymentNote || null, p_weeks_to_cover:weeks, p_request_key:requestKey });
     setPaymentSaving(false); endAction('contribution');
     if (error) { setPaymentMessage(`No se pudo registrar el aporte: ${error.message}`); return; }
     clearRequestKey('contribution');
-    setPaymentMessage(editingContributionId?'Aporte actualizado y semanas recalculadas.':'Aporte registrado. El total y las semanas cubiertas ya se actualizaron.');
+    setPaymentMessage(null);
+    setContributionConfirmation({ participantName, amountCents, weeks, updated:isEditing });
     setPaymentNote(''); setEditingContributionId(null); void refreshFinancialSummary();
     if (selectedMember) void loadParticipantReceipts(selectedMember.participant_id);
   }
@@ -527,6 +532,17 @@ export default function App() {
         {tab==='perfil'&&<Page heading="Mi perfil" desc="Actualiza tus datos y tu foto de perfil de forma segura." icon={<Users size={27}/>}><div className="form-grid"><section className="form-card profile-card"><div className="profile-avatar-preview">{profileAvatar?<img src={profileAvatar} alt="Foto de perfil"/>:(profileName||user.email||'U').slice(0,1).toUpperCase()}</div><label htmlFor="my-profile-photo">Foto de perfil <small>(PNG, JPG o WebP · hasta 8 MB; se optimiza al subir)</small></label><input id="my-profile-photo" type="file" accept="image/png,image/jpeg,image/webp" onChange={event=>setProfilePhoto(event.target.files?.[0] ?? null)}/>{profilePhoto&&<p className="mini">Nueva imagen: {profilePhoto.name}</p>}</section><section className="form-card"><label htmlFor="my-profile-name">Nombre completo</label><input id="my-profile-name" value={profileName} onChange={event=>setProfileName(event.target.value)} maxLength={100}/><label htmlFor="my-profile-phone">Número de celular</label><input id="my-profile-phone" value={profilePhone} onChange={event=>setProfilePhone(event.target.value)} maxLength={24}/><p className="mini">Tu correo de Google no se modifica desde aquí.</p><button className="primary" disabled={profileSaving} onClick={()=>void saveProfile()}>{profileSaving?'Guardando…':'Guardar perfil'}</button>{profileMessage&&<p className="payment-message">{profileMessage}</p>}</section></div></Page>}
         {tab==='configuracion'&&role==='treasurer'&&<section className="branding-settings"><div className="branding-preview">{groupLogo?<img src={groupLogo} alt={`Logo actual de ${groupName}`}/>:<Icon icon="solar:buildings-2-linear"/>}</div><div><p className="settings-overline">IDENTIDAD DEL GRUPO</p><h2>Logo de la institución</h2><p>Se mostrará junto al panel del grupo. Puedes reemplazarlo cuando lo necesites.</p></div><label className="branding-upload">Elegir logo<input type="file" accept="image/png,image/jpeg,image/webp" onChange={event=>setGroupLogoFile(event.target.files?.[0] ?? null)}/></label><button className="primary" disabled={brandingSaving||!groupLogoFile} onClick={()=>void saveGroupBranding()}>{brandingSaving?'Subiendo…':'Guardar logo'}</button>{brandingMessage&&<p className="payment-message">{brandingMessage}</p>}</section>}
       </main>
+      {contributionConfirmation&&<div className="confirmation-layer" role="presentation" onMouseDown={()=>setContributionConfirmation(null)}>
+        <section className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="contribution-confirmation-title" onMouseDown={event=>event.stopPropagation()}>
+          <div className="confirmation-seal"><CheckCircle2 size={34}/></div>
+          <button className="confirmation-close" aria-label="Cerrar confirmación" onClick={()=>setContributionConfirmation(null)}><X size={18}/></button>
+          <p className="settings-overline">REGISTRO CONFIRMADO</p>
+          <h2 id="contribution-confirmation-title">{contributionConfirmation.updated?'Aporte actualizado':'Aporte registrado'}</h2>
+          <p>El aporte de <strong>{contributionConfirmation.participantName}</strong> ya quedó reflejado en la caja y en sus semanas cubiertas.</p>
+          <div className="confirmation-summary"><span><b>{money(contributionConfirmation.amountCents)}</b><small>Monto recibido</small></span><span><b>{contributionConfirmation.weeks}</b><small>{contributionConfirmation.weeks===1?'semana cubierta':'semanas cubiertas'}</small></span></div>
+          <div className="confirmation-actions"><button className="member-open-action" onClick={()=>{setContributionConfirmation(null);setPaymentMessage(null);}}>Registrar otro</button><button className="primary" onClick={()=>{setContributionConfirmation(null);setSelectedMember(null);setPaymentMessage(null);selectTab('compañeros');}}><Users size={16}/> Ver participantes</button></div>
+        </section>
+      </div>}
     </div>
   </div>;
 }
