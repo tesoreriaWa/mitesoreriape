@@ -89,6 +89,9 @@ revoke all on function public.rebuild_participant_allocations(uuid,uuid) from pu
 drop function if exists public.record_participant_contribution(uuid,uuid,integer,date,text);
 drop function if exists public.record_participant_contribution(uuid,uuid,integer,date,text,integer);
 drop function if exists public.record_cash_movement(uuid,text,integer,text,date);
+-- La versión 0009 tenía parámetros opcionales; Postgres exige eliminarla antes
+-- de reemplazarla por la firma estricta de producción.
+drop function if exists public.update_participant_contribution(uuid,uuid,integer,date,text,integer);
 
 create or replace function public.record_participant_contribution(
   p_group_id uuid, p_participant_id uuid, p_amount_cents integer, p_received_on date,
