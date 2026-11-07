@@ -278,7 +278,7 @@ export default function App() {
       ? await supabase.rpc('update_participant_contribution', { p_group_id:groupId, p_contribution_id:editingContributionId, p_amount_cents:amountCents, p_received_on:paymentDate, p_note:paymentNote || null, p_weeks_to_cover:weeks })
       : await supabase.rpc('record_participant_contribution', { p_group_id:groupId, p_participant_id:selectedStudent, p_amount_cents:amountCents, p_received_on:paymentDate, p_note:paymentNote || null, p_weeks_to_cover:weeks, p_request_key:requestKey });
     setPaymentSaving(false); endAction('contribution');
-    if (error) { setPaymentMessage('No se pudo registrar el aporte. Ejecuta la migración operativa y vuelve a intentarlo.'); return; }
+    if (error) { setPaymentMessage(`No se pudo registrar el aporte: ${error.message}`); return; }
     clearRequestKey('contribution');
     setPaymentMessage(editingContributionId?'Aporte actualizado y semanas recalculadas.':'Aporte registrado. El total y las semanas cubiertas ya se actualizaron.');
     setPaymentNote(''); setEditingContributionId(null); void refreshFinancialSummary();
@@ -336,7 +336,7 @@ export default function App() {
     const requestKey = getRequestKey('cash', [groupId,cashType,cashCents,cashReason,cashDate].join('|'));
     const { error } = await supabase.rpc('record_cash_movement', { p_group_id:groupId, p_movement_type:cashType, p_amount_cents:cashCents, p_reason:cashReason, p_occurred_on:cashDate, p_request_key:requestKey });
     setCashSaving(false); endAction('cash');
-    if (error) { setCashMessage('No se pudo registrar el movimiento. Ejecuta la migración operativa y vuelve a intentarlo.'); return; }
+    if (error) { setCashMessage(`No se pudo registrar el movimiento: ${error.message}`); return; }
     clearRequestKey('cash');
     setCashAmount(''); setCashReason(''); setCashMessage('Movimiento registrado y visible para el grupo.');
     void refreshFinancialSummary(); void loadCashMovements();
